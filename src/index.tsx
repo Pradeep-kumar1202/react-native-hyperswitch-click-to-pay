@@ -1,5 +1,5 @@
-import HyperswitchClickToPay from './NativeHyperswitchClickToPay';
-
-export function multiply(a: number, b: number): number {
-  return HyperswitchClickToPay.multiply(a, b);
-}
+export { default as VisaSDKIntegration } from './components/VisaSDKIntegration';
+export type {
+  VisaSDKIntegrationProps,
+  VisaSDKRef,
+} from './components/VisaSDKIntegration';

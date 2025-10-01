@@ -160,5 +160,8 @@
     "languages": "kotlin-objc",
     "type": "turbo-module",
     "version": "0.54.3"
+  },
+  "dependencies": {
+    "react-native-webview": "^13.16.0"
   }
 }
