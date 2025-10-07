@@ -209,7 +209,7 @@ export default function App() {
         </ScrollView>
       )}
 
-      {/* Hidden WebView that loads the SDK */}
+      {/* WebView that loads the SDK and shows loader */}
       <VisaSDKIntegration
         ref={sdkRef}
         onSDKReady={(methods) => {
@@ -220,6 +220,7 @@ export default function App() {
           console.error('SDK Error:', error);
           setStatus(`SDK Error: ${error.message}`);
         }}
+        style={{ height: 200, width: '100%' }}
       />
     </View>
   );

@@ -90,6 +90,12 @@ const VisaSDKIntegration = forwardRef<VisaSDKRef, VisaSDKIntegrationProps>((prop
         return;
       }
 
+      // Location log event
+      if (message.type === 'LOCATION_LOG') {
+        console.log('[RN] 🌐 Window Location:', message.data);
+        return;
+      }
+
       // Function response
       if (message.id) {
         const callback = callbacks.current.get(message.id);
@@ -112,6 +118,11 @@ const VisaSDKIntegration = forwardRef<VisaSDKRef, VisaSDKIntegrationProps>((prop
   const handleError = (syntheticEvent: any) => {
     console.error('[RN] WebView error:', syntheticEvent.nativeEvent);
     onError?.(new Error(syntheticEvent.nativeEvent.description || 'WebView error'));
+  };
+
+  const handleNavigationStateChange = (navState: any) => {
+    console.log('[RN] Navigation:', navState.url);
+    // You can intercept redirects here if needed
   };
 
   // JavaScript to inject into WebView to set up communication bridge
@@ -159,12 +170,61 @@ const VisaSDKIntegration = forwardRef<VisaSDKRef, VisaSDKIntegrationProps>((prop
     console.log('[WebView] Message listeners ready');
   }
 
+  // Loader functions
+  // let loaderStartTime = 0;
+  // const MIN_LOADER_DISPLAY_MS = 800; // Minimum time to show loader
+
+  function showLoader() {
+    const loader = document.getElementById('loader-container');
+    if (loader) {
+      loader.classList.add('visible');
+      // loaderStartTime = Date.now();
+      console.log('[WebView] Loader shown');
+    }
+  }
+
+  function hideLoader() {
+    const loader = document.getElementById('loader-container');
+    if (loader) {
+      // Calculate how long the loader has been visible
+      // const elapsedTime = Date.now() - loaderStartTime;
+      // const remainingTime = MIN_LOADER_DISPLAY_MS - elapsedTime;
+
+      // If loader hasn't been shown for minimum time, wait
+      // if (remainingTime > 0) {
+      //   await new Promise(resolve => setTimeout(resolve, remainingTime));
+      // }
+
+      loader.classList.remove('visible');
+      console.log('[WebView] Loader hidden');
+    }
+  }
+
   async function handleMessage(data) {
     try {
       const message = JSON.parse(data);
       console.log('[WebView] Received:', message);
 
       const { id, functionName, args } = message;
+
+      // Handle special commands
+      if (functionName === 'showLoader') {
+        showLoader();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          id: id,
+          data: true
+        }));
+        return;
+      }
+
+      if (functionName === 'hideLoader') {
+        hideLoader();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          id: id,
+          data: true
+        }));
+        return;
+      }
 
       if (!sdkReady) {
         throw new Error('SDK not ready');
@@ -175,8 +235,37 @@ const VisaSDKIntegration = forwardRef<VisaSDKRef, VisaSDKIntegrationProps>((prop
       }
 
       console.log('[WebView] Calling VSDK.' + functionName);
+      console.log('[WebView] Args:', JSON.stringify(args, null, 2));
+
+      console.log('[WebView] Calling VSDK.' + functionName);
+      console.log('[WebView] Args:', JSON.stringify(args, null, 2));
+
+      // Show loader for async operations
+      if (['initialize', 'getCards', 'checkout'].includes(functionName)) {
+        showLoader();
+      }
+
       const result = await VSDK[functionName](...(args || []));
-      console.log('[WebView] Result:', result);
+
+      console.log('[WebView] Result:', JSON.stringify(result, null, 2));
+      console.log('[WebView] window.location.href:', window.location.href);
+
+      // Log if there's an error in the result
+      if (result && result.error) {
+        console.error('[WebView] VSDK returned error:', result.error);
+      }
+
+      // Hide loader after operation completes
+      if (['initialize', 'getCards', 'checkout'].includes(functionName)) {
+        hideLoader();
+      }
+
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'LOCATION_LOG',
+        data: {
+          demo: window.location,
+        }
+      }));
 
       window.ReactNativeWebView.postMessage(JSON.stringify({
         id: id,
@@ -185,6 +274,7 @@ const VisaSDKIntegration = forwardRef<VisaSDKRef, VisaSDKIntegrationProps>((prop
 
     } catch (error) {
       console.error('[WebView] Error:', error);
+      hideLoader(); // Always hide loader on error
       window.ReactNativeWebView.postMessage(JSON.stringify({
         id: message.id,
         error: error.message || String(error)
@@ -206,8 +296,60 @@ true; // Required for injectedJavaScript
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Mastercard SRC UI Kit for loader component -->
+    <link rel="stylesheet" href="https://src.mastercard.com/srci/integration/components/src-ui-kit/src-ui-kit.css">
+    <script type="module" src="https://src.mastercard.com/srci/integration/components/src-ui-kit/src-ui-kit.esm.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #loader-container {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: white;
+        z-index: 9999;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+      }
+      #loader-container.visible {
+        display: flex;
+      }
+    </style>
+   <script>
+    // Polyfills BEFORE SDK loads - critical for VSDK
+    console.log('[WebView] Setting up polyfills...');
+
+    // Ensure parent/top/opener exist to prevent null errors
+    if (!window.parent) {
+      window.parent = window;
+    }
+    if (!window.top) {
+      window.top = window;
+    }
+    if (window.opener === undefined) {
+      window.opener = null;
+    }
+
+    console.log('[WebView] Polyfills ready');
+    console.log('[WebView] window.location:', window.location.href);
+    console.log('[WebView] window.parent:', window.parent === window ? 'self' : 'external');
+    </script>
   </head>
   <body>
+    <div id="loader-container">
+      <src-loader></src-loader>
+    </div>
+    <!-- Container for potential 3DS iframe/content -->
+    <div id="visa-sdk-container" style="width:100%;height:100vh;"></div>
+    <div id="three-ds-container"></div>
+
     <script src="${sdkUrl}" crossorigin="anonymous"></script>
   </body>
 </html>`;
@@ -222,14 +364,15 @@ true; // Required for injectedJavaScript
       injectedJavaScript={injectedJavaScript}
       onMessage={handleMessage}
       onError={handleError}
+      onNavigationStateChange={handleNavigationStateChange}
       javaScriptEnabled={true}
       domStorageEnabled={true}
       thirdPartyCookiesEnabled={true}
       sharedCookiesEnabled={true}
       mixedContentMode="always"
       originWhitelist={['*']}
-      // Hidden by default - you don't need to see the WebView
-      style={style || { height: 0, width: 0, opacity: 0 }}
+      // Use provided style or default to full height for loader visibility
+      style={style || { height: 200, width: '100%' }}
     />
   );
 });
