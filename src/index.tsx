@@ -1,5 +1,18 @@
-import HyperswitchClickToPay from './NativeHyperswitchClickToPay';
+// Export types
+export type {
+  ClickToPayConfig,
+  ClickToPayCard,
+  ClickToPayError,
+  PaymentRequest,
+  PaymentResult,
+} from './types';
 
-export function multiply(a: number, b: number): number {
-  return HyperswitchClickToPay.multiply(a, b);
-}
+// Export Provider and hook
+export { ClickToPayProvider, useClickToPay } from './ClickToPayProvider';
+
+// Export Component (for advanced use cases)
+export { default as ClickToPayComponent } from './ClickToPayComponent';
+export type {
+  ClickToPayComponentRef,
+  ClickToPayComponentProps,
+} from './ClickToPayComponent';
