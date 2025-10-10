@@ -4,58 +4,65 @@ import React, {
   useState,
   useRef,
   useCallback,
-  useEffect,
 } from 'react';
 import ClickToPayComponent, {
   type ClickToPayComponentRef,
 } from './ClickToPayComponent';
-import type {
-  ClickToPayConfig,
-  ClickToPayCard,
-  ClickToPayError,
-} from './types';
+import type { ClickToPayConfig, ClickToPayCard } from './types';
+
+type ValidateResult = {
+  cards?: ClickToPayCard[];
+  requiresOTP?: boolean;
+  requiresNewCard?: boolean;
+  maskedValidationChannel?: string;
+};
+
+type CardData = {
+  cardNumber: string;
+  expiryMonth: string;
+  expiryYear: string;
+  cvv: string;
+  cardholderName?: string;
+};
+
+type CheckoutParams = {
+  srcDigitalCardId?: string;
+  encryptedCard?: string;
+  cardData?: CardData;
+  amount: string;
+  currency: string;
+  orderId: string;
+  rememberMe?: boolean;
+};
 
 type ClickToPayContextValue = {
-  isReady: boolean;
   isLoading: boolean;
-  error: ClickToPayError | null;
   cards: ClickToPayCard[];
-  config: ClickToPayConfig;
-  updateConfig: (updates: Partial<ClickToPayConfig>) => void;
-  getCards: (userIdentity?: {
+  config: ClickToPayConfig | null;
+  initialize: (config: ClickToPayConfig) => Promise<void>;
+  validate: (userIdentity: {
     value: string;
     type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER';
-  }) => Promise<ClickToPayCard[]>;
-  idLookup: (userIdentity: {
-    value: string;
-    type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER';
-  }) => Promise<any>;
-  initiateValidation: (requestedValidationChannelId?: string) => Promise<any>;
-  validate: (otpCode: string) => Promise<any>;
-  checkout: (
-    cardId: string,
-    amount: string,
-    currency: string,
-    orderId: string
-  ) => Promise<any>;
-  clearError: () => void;
+  }) => Promise<ValidateResult>;
+  authenticate: (otpCode: string) => Promise<ClickToPayCard[]>;
+  checkout: (params: CheckoutParams) => Promise<any>;
 };
 
 const ClickToPayContext = createContext<ClickToPayContextValue | null>(null);
 
 export type ClickToPayProviderProps = {
-  config: ClickToPayConfig;
   children: React.ReactNode;
+  onCookiesExtracted?: (cookies: string) => void;
+  initialCookies?: string;
 };
 
 export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
-  config: initialConfig,
   children,
+  onCookiesExtracted,
+  initialCookies,
 }) => {
-  const [config, setConfig] = useState<ClickToPayConfig>(initialConfig);
-  const [isReady, setIsReady] = useState(false);
+  const [config, setConfig] = useState<ClickToPayConfig | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<ClickToPayError | null>(null);
   const [cards, setCards] = useState<ClickToPayCard[]>([]);
   const [userIdentity, setUserIdentity] = useState<{
     value: string;
@@ -68,39 +75,37 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
     reject: (error: Error) => void;
   } | null>(null);
 
-  const isVisa = config.provider === 'visa';
+  const isVisa = config?.provider === 'visa';
 
-  const buildSDKUrl = useCallback((): string => {
-    if (isVisa) {
+  const buildSDKUrl = useCallback((cfg: ClickToPayConfig): string => {
+    const isVisaProvider = cfg.provider === 'visa';
+    if (isVisaProvider) {
       const baseUrl =
-        config.environment === 'sandbox'
+        cfg.environment === 'sandbox'
           ? 'https://sandbox.secure.checkout.visa.com/checkout-widget/resources/js/integration/v2/sdk.js'
           : 'https://secure.checkout.visa.com/checkout-widget/resources/js/integration/v2/sdk.js';
 
-      return `${baseUrl}?dpaId=${config.dpaId}&cardBrands=${config.cardBrands}&dpaClientId=${config.clientId}&locale=${config.locale}`;
+      return `${baseUrl}?dpaId=${cfg.dpaId}&cardBrands=${cfg.cardBrands}&dpaClientId=${cfg.clientId}&locale=${cfg.locale}`;
     } else {
       const baseUrl =
-        config.environment === 'sandbox'
+        cfg.environment === 'sandbox'
           ? 'https://sandbox.src.mastercard.com/srci/integration/2/lib.js'
           : 'https://src.mastercard.com/srci/integration/2/lib.js';
 
-      return `${baseUrl}?srcDpaId=${config.dpaId}&locale=${config.locale}`;
+      return `${baseUrl}?srcDpaId=${cfg.dpaId}&locale=${cfg.locale}`;
     }
-  }, [config, isVisa]);
+  }, []);
 
-  const buildInitializeOptions = useCallback((): any => {
-    const transactionAmount = config.transactionAmount
-      ? isVisa
-        ? String(config.transactionAmount)
-        : Number(config.transactionAmount)
-      : isVisa
-        ? '500.00'
-        : 500;
+  const buildInitializeOptions = useCallback((cfg: ClickToPayConfig): any => {
+    const isVisaProvider = cfg.provider === 'visa';
+    const transactionAmount = isVisaProvider
+      ? String(cfg.transactionAmount)
+      : Number(cfg.transactionAmount);
 
-    if (isVisa) {
+    if (isVisaProvider) {
       return {
         dpaTransactionOptions: {
-          dpaLocale: config.locale,
+          dpaLocale: cfg.locale,
           authenticationPreferences: {
             authenticationMethods: [
               {
@@ -121,7 +126,7 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           ],
           transactionAmount: {
             transactionAmount: transactionAmount,
-            transactionCurrencyCode: config.transactionCurrency,
+            transactionCurrencyCode: cfg.transactionCurrency,
           },
           acquirerBIN: '455555',
           acquirerMerchantId: '12345678',
@@ -129,18 +134,18 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           merchantCountryCode: 'US',
           payloadTypeIndicator: 'FULL',
           dpaBillingPreference: 'NONE',
-          merchantName: config.clientId,
+          merchantName: cfg.clientId,
           merchantOrderId: 'ctp_2142',
         },
       };
     } else {
-      return {
-        srcDpaId: config.dpaId,
+      const mastercardOptions: any = {
+        srcDpaId: cfg.dpaId,
         dpaData: {
-          dpaName: config.clientId,
+          dpaName: cfg.clientId,
         },
         dpaTransactionOptions: {
-          dpaLocale: config.locale,
+          dpaLocale: cfg.locale,
           authenticationPreferences: {
             payloadRequested: 'AUTHENTICATED',
           },
@@ -152,7 +157,7 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           ],
           transactionAmount: {
             transactionAmount: transactionAmount,
-            transactionCurrencyCode: config.transactionCurrency,
+            transactionCurrencyCode: cfg.transactionCurrency,
           },
           acquirerBIN: '545301',
           acquirerMerchantId: 'SRC3DS',
@@ -160,138 +165,31 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           merchantCountryCode: 'US',
         },
         checkoutExperience: 'WITHIN_CHECKOUT',
-        cardBrands: config.cardBrands?.split(','),
+        cardBrands: cfg.cardBrands?.split(','),
       };
+
+      if (cfg.recognitionToken) {
+        mastercardOptions.recognitionToken = cfg.recognitionToken;
+      }
+
+      return mastercardOptions;
     }
-  }, [config, isVisa]);
-
-  const buildGetCardsParams = useCallback(
-    (userIdentity: {
-      value: string;
-      type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER';
-    }): any => {
-      return {
-        consumerIdentity: {
-          identityProvider: 'SRC',
-          identityValue: userIdentity.value,
-          identityType: userIdentity.type,
-        },
-      };
-    },
-    []
-  );
-
-  const buildIdLookupParams = useCallback(
-    (userIdentity: {
-      value: string;
-      type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER';
-    }): any => {
-      if (isVisa) {
-        return {
-          consumerIdentity: {
-            identityProvider: 'SRC',
-            identityValue: userIdentity.value,
-            identityType: userIdentity.type,
-          },
-        };
-      } else {
-        if (userIdentity.type === 'EMAIL_ADDRESS') {
-          return {
-            email: userIdentity.value,
-          };
-        } else {
-          return {
-            mobileNumber: {
-              countryCode: '1',
-              phoneNumber: userIdentity.value,
-            },
-          };
-        }
-      }
-    },
-    [isVisa]
-  );
-
-  const buildInitiateValidationParams = useCallback(
-    (requestedValidationChannelId?: string): any => {
-      if (isVisa) {
-        return {};
-      } else {
-        return requestedValidationChannelId
-          ? { requestedValidationChannelId }
-          : undefined;
-      }
-    },
-    [isVisa]
-  );
-
-  const buildValidateParams = useCallback(
-    (
-      otpCode: string,
-      userIdentity?: { value: string; type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER' }
-    ): any => {
-      if (isVisa) {
-        return {
-          consumerIdentity: {
-            identityProvider: 'SRC',
-            identityValue: userIdentity?.value,
-            identityType: userIdentity?.type,
-          },
-          validationData: otpCode,
-        };
-      } else {
-        return {
-          value: otpCode,
-        };
-      }
-    },
-    [isVisa]
-  );
-
-  const buildCheckoutParams = useCallback(
-    (
-      cardId: string,
-      amount: string,
-      currency: string,
-      orderId: string
-    ): any => {
-      if (isVisa) {
-        return {
-          srcDigitalCardId: cardId,
-          amount: amount,
-          currency: currency,
-          merchantOrderId: orderId,
-        };
-      } else {
-        return {
-          srcDigitalCardId: cardId,
-          dpaTransactionOptions: {
-            transactionAmount: {
-              transactionAmount: parseFloat(amount),
-              transactionCurrencyCode: currency,
-            },
-          },
-          rememberMe: true,
-        };
-      }
-    },
-    [isVisa]
-  );
+  }, []);
 
   const formatCards = useCallback((data: any): ClickToPayCard[] => {
-    let cards = [];
+    let cardsList = [];
 
     if (data?.profiles?.[0]?.maskedCards) {
-      cards = data.profiles[0].maskedCards;
+      cardsList = data.profiles[0].maskedCards;
     } else if (Array.isArray(data)) {
-      cards = data;
+      cardsList = data;
     } else if (data?.cards) {
-      cards = data.cards;
+      cardsList = data.cards;
     } else {
       return [];
     }
 
-    return cards.map((card: any) => ({
+    return cardsList.map((card: any) => ({
       id: card.srcDigitalCardId ?? card.digitalCardId,
       maskedPan:
         card.panLastFour ??
@@ -307,56 +205,64 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
     }));
   }, []);
 
+  const sendToWebView = useCallback((type: string, data: any) => {
+    componentRef.current?.sendMessage(type, data);
+  }, []);
+
   const handleWebViewMessage = useCallback(
     (type: string, data: any) => {
       console.log(`[Provider] Received: ${type}`, data);
 
       switch (type) {
         case 'LOAD_SUCCESS':
-          console.log('[Provider] SDK loaded, initializing...');
-          const initializeOptions = buildInitializeOptions();
-          componentRef.current?.sendMessage('INIT', {
-            isVISA: isVisa,
+          if (!config) return;
+          const initializeOptions = buildInitializeOptions(config);
+          sendToWebView('INIT', {
+            isVISA: config.provider === 'visa',
             initializeOptions,
           });
           break;
 
         case 'LOAD_ERROR':
-          console.error('[Provider] SDK load failed');
-          setError({
-            message: 'Failed to load SDK',
-            code: 'SDK_LOAD_ERROR',
-            category: 'network',
-            recoverable: true,
-          });
           setIsLoading(false);
+          if (pendingPromiseRef.current) {
+            pendingPromiseRef.current.reject(new Error('SDK_LOAD_ERROR'));
+            pendingPromiseRef.current = null;
+          }
           break;
 
         case 'INIT_SUCCESS':
-          console.log('[Provider] SDK initialized successfully');
-          setIsReady(true);
           setIsLoading(false);
+          if (pendingPromiseRef.current) {
+            pendingPromiseRef.current.resolve(undefined);
+            pendingPromiseRef.current = null;
+          }
           break;
 
         case 'INIT_FAILED':
-          console.error('[Provider] SDK initialization failed:', data);
-          setError({
-            message: data || 'SDK initialization failed',
-            code: 'SDK_INIT_ERROR',
-            category: 'configuration',
-            recoverable: false,
-          });
           setIsLoading(false);
+          if (pendingPromiseRef.current) {
+            pendingPromiseRef.current.reject(new Error(data));
+            pendingPromiseRef.current = null;
+          }
           break;
 
         case 'GET_CARDS_SUCCESS':
-          console.log('[Provider] Cards retrieved successfully');
-
           if (data.actionCode === 'PENDING_CONSUMER_IDV') {
-            console.log('[Provider] OTP required - waiting for validation');
             setIsLoading(false);
             if (pendingPromiseRef.current) {
-              pendingPromiseRef.current.reject(new Error('OTP_REQUIRED'));
+              pendingPromiseRef.current.resolve({
+                requiresOTP: true,
+                maskedValidationChannel: data.maskedValidationChannel,
+              });
+              pendingPromiseRef.current = null;
+            }
+          } else if (data.actionCode === 'ADD_CARD') {
+            setIsLoading(false);
+            if (pendingPromiseRef.current) {
+              pendingPromiseRef.current.resolve({
+                requiresNewCard: true,
+              });
               pendingPromiseRef.current = null;
             }
           } else {
@@ -364,20 +270,13 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
             setCards(formattedCards);
             setIsLoading(false);
             if (pendingPromiseRef.current) {
-              pendingPromiseRef.current.resolve(formattedCards);
+              pendingPromiseRef.current.resolve({ cards: formattedCards });
               pendingPromiseRef.current = null;
             }
           }
           break;
 
         case 'GET_CARDS_FAILED':
-          console.error('[Provider] Get cards failed:', data);
-          setError({
-            message: data || 'Failed to get cards',
-            code: 'GET_CARDS_ERROR',
-            category: 'network',
-            recoverable: true,
-          });
           setIsLoading(false);
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.reject(new Error(data));
@@ -386,7 +285,6 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'ID_LOOKUP_SUCCESS':
-          console.log('[Provider] ID lookup successful');
           setIsLoading(false);
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.resolve(data);
@@ -395,7 +293,6 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'ID_LOOKUP_FAILED':
-          console.error('[Provider] ID lookup failed:', data);
           setIsLoading(false);
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.reject(new Error(data));
@@ -404,7 +301,6 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'INITIATE_VALIDATION_SUCCESS':
-          console.log('[Provider] Validation initiated successfully');
           setIsLoading(false);
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.resolve(data);
@@ -413,7 +309,6 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'INITIATE_VALIDATION_FAILED':
-          console.error('[Provider] Initiate validation failed:', data);
           setIsLoading(false);
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.reject(new Error(data));
@@ -422,7 +317,6 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'VALIDATE_SUCCESS':
-          console.log('[Provider] Validation successful');
           const validatedCards = formatCards(data);
           setCards(validatedCards);
           setIsLoading(false);
@@ -433,7 +327,6 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'VALIDATE_FAILED':
-          console.error('[Provider] Validation failed:', data);
           setIsLoading(false);
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.reject(new Error(data));
@@ -442,7 +335,6 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'CHECKOUT_SUCCESS':
-          console.log('[Provider] Checkout successful');
           setIsLoading(false);
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.resolve(data);
@@ -451,14 +343,21 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           break;
 
         case 'CHECKOUT_FAILED':
-          console.error('[Provider] Checkout failed:', data);
-          setError({
-            message: data || 'Checkout failed',
-            code: 'CHECKOUT_ERROR',
-            category: 'payment',
-            recoverable: true,
-          });
           setIsLoading(false);
+          if (pendingPromiseRef.current) {
+            pendingPromiseRef.current.reject(new Error(data));
+            pendingPromiseRef.current = null;
+          }
+          break;
+
+        case 'ENCRYPT_CARD_SUCCESS':
+          if (pendingPromiseRef.current) {
+            pendingPromiseRef.current.resolve(data);
+            pendingPromiseRef.current = null;
+          }
+          break;
+
+        case 'ENCRYPT_CARD_FAILED':
           if (pendingPromiseRef.current) {
             pendingPromiseRef.current.reject(new Error(data));
             pendingPromiseRef.current = null;
@@ -469,177 +368,236 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
           console.log(`[Provider] Unhandled message type: ${type}`);
       }
     },
-    [buildInitializeOptions, formatCards, isVisa]
+    [buildInitializeOptions, formatCards, sendToWebView, config]
   );
 
-  useEffect(() => {
-    console.log('[Provider] Initializing SDK...');
-    setIsLoading(true);
-
-    const sdkUrl = buildSDKUrl();
-    componentRef.current?.sendMessage('LOAD', { sdkUrl });
-  }, [buildSDKUrl]);
-
-  const updateConfig = useCallback((updates: Partial<ClickToPayConfig>) => {
-    setConfig((prev) => ({ ...prev, ...updates }));
-  }, []);
-
-  const clearError = useCallback(() => {
-    setError(null);
-  }, []);
-
-  const getCards = useCallback(
-    async (userIdentity?: {
-      value: string;
-      type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER';
-    }): Promise<ClickToPayCard[]> => {
-      if (!isReady) {
-        throw new Error('SDK not ready');
-      }
-
-      const identity = userIdentity || {
-        value: 'user@example.com',
-        type: 'EMAIL_ADDRESS',
-      };
-      setUserIdentity(identity);
-
+  const initialize = useCallback(
+    async (newConfig: ClickToPayConfig): Promise<void> => {
+      setConfig(newConfig);
       setIsLoading(true);
-      clearError();
 
-      const params = buildGetCardsParams(identity);
+      const sdkUrl = buildSDKUrl(newConfig);
 
       return new Promise((resolve, reject) => {
         pendingPromiseRef.current = { resolve, reject };
-        componentRef.current?.sendMessage('GET_CARDS', {
-          isVISA: isVisa,
-          params,
-        });
+        sendToWebView('LOAD', { sdkUrl });
       });
     },
-    [isReady, isVisa, buildGetCardsParams, clearError]
-  );
-
-  const idLookup = useCallback(
-    async (userIdentity: {
-      value: string;
-      type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER';
-    }): Promise<any> => {
-      if (!isReady) {
-        throw new Error('SDK not ready');
-      }
-
-      setIsLoading(true);
-      clearError();
-
-      const params = buildIdLookupParams(userIdentity);
-
-      return new Promise((resolve, reject) => {
-        pendingPromiseRef.current = { resolve, reject };
-        componentRef.current?.sendMessage('ID_LOOKUP', {
-          isVISA: isVisa,
-          params,
-        });
-      });
-    },
-    [isReady, isVisa, buildIdLookupParams, clearError]
-  );
-
-  const initiateValidation = useCallback(
-    async (requestedValidationChannelId?: string): Promise<any> => {
-      if (!isReady) {
-        throw new Error('SDK not ready');
-      }
-
-      setIsLoading(true);
-      clearError();
-
-      const params = buildInitiateValidationParams(
-        requestedValidationChannelId
-      );
-
-      return new Promise((resolve, reject) => {
-        pendingPromiseRef.current = { resolve, reject };
-        componentRef.current?.sendMessage('INITIATE_VALIDATION', {
-          isVISA: isVisa,
-          params,
-        });
-      });
-    },
-    [isReady, isVisa, buildInitiateValidationParams, clearError]
+    [buildSDKUrl, sendToWebView]
   );
 
   const validate = useCallback(
-    async (otpCode: string): Promise<any> => {
-      if (!isReady) {
-        throw new Error('SDK not ready');
+    async (identity: {
+      value: string;
+      type: 'EMAIL_ADDRESS' | 'PHONE_NUMBER';
+    }): Promise<ValidateResult> => {
+      if (!config) {
+        throw new Error('SDK not initialized');
       }
 
+      setUserIdentity(identity);
       setIsLoading(true);
-      clearError();
 
-      if (isVisa) {
-        const params = buildValidateParams(otpCode, userIdentity || undefined);
-        return new Promise((resolve, reject) => {
-          pendingPromiseRef.current = { resolve, reject };
-          componentRef.current?.sendMessage('GET_CARDS', {
-            isVISA: isVisa,
-            params,
-          });
-        });
-      } else {
-        const params = buildValidateParams(otpCode);
-        return new Promise((resolve, reject) => {
-          pendingPromiseRef.current = { resolve, reject };
-          componentRef.current?.sendMessage('VALIDATE', {
-            isVISA: isVisa,
-            params,
-          });
-        });
-      }
-    },
-    [isReady, isVisa, buildValidateParams, clearError, userIdentity]
-  );
+      const params = {
+        consumerIdentity: {
+          identityProvider: 'SRC',
+          identityValue: identity.value,
+          identityType: identity.type,
+        },
+      };
 
-  const checkout = useCallback(
-    async (
-      cardId: string,
-      amount: string,
-      currency: string,
-      orderId: string
-    ): Promise<any> => {
-      if (!isReady) {
-        throw new Error('SDK not ready');
-      }
-
-      setIsLoading(true);
-      clearError();
-
-      const params = buildCheckoutParams(cardId, amount, currency, orderId);
-
-      return new Promise((resolve, reject) => {
+      return new Promise(async (resolve, reject) => {
         pendingPromiseRef.current = { resolve, reject };
-        componentRef.current?.sendMessage('CHECKOUT', {
+        sendToWebView('GET_CARDS', {
           isVISA: isVisa,
           params,
         });
+      }).then(async (result: any) => {
+        if (result.cards && result.cards.length > 0) {
+          return result;
+        }
+
+        if (result.requiresOTP || result.requiresNewCard) {
+          return result;
+        }
+
+        if (!isVisa) {
+          const idLookupParams =
+            identity.type === 'EMAIL_ADDRESS'
+              ? { email: identity.value }
+              : {
+                  mobileNumber: {
+                    countryCode: '1',
+                    phoneNumber: identity.value,
+                  },
+                };
+
+          return new Promise((resolve, reject) => {
+            pendingPromiseRef.current = { resolve, reject };
+            sendToWebView('ID_LOOKUP', {
+              isVISA: false,
+              params: idLookupParams,
+            });
+          }).then(async (idLookupResult: any) => {
+            if (idLookupResult.consumerPresent) {
+              return new Promise((resolve, reject) => {
+                pendingPromiseRef.current = { resolve, reject };
+                sendToWebView('INITIATE_VALIDATION', {
+                  isVISA: false,
+                  params: undefined,
+                });
+              }).then(() => ({
+                requiresOTP: true,
+              }));
+            } else {
+              return {
+                requiresNewCard: true,
+              };
+            }
+          });
+        }
+
+        return result;
       });
     },
-    [isReady, isVisa, buildCheckoutParams, clearError]
+    [isVisa, config, sendToWebView]
+  );
+
+  const authenticate = useCallback(
+    async (otpCode: string): Promise<ClickToPayCard[]> => {
+      if (!config) {
+        throw new Error('SDK not initialized');
+      }
+
+      setIsLoading(true);
+
+      if (isVisa) {
+        const params = {
+          consumerIdentity: {
+            identityProvider: 'SRC',
+            identityValue: userIdentity?.value,
+            identityType: userIdentity?.type,
+          },
+          validationData: otpCode,
+        };
+
+        return new Promise((resolve, reject) => {
+          pendingPromiseRef.current = { resolve, reject };
+          sendToWebView('GET_CARDS', {
+            isVISA: true,
+            params,
+          });
+        }).then((result: any) => {
+          if (result.cards) {
+            return result.cards;
+          }
+          const formattedCards = formatCards(result);
+          return formattedCards;
+        });
+      } else {
+        const params = {
+          value: otpCode,
+        };
+
+        return new Promise((resolve, reject) => {
+          pendingPromiseRef.current = { resolve, reject };
+          sendToWebView('VALIDATE', {
+            isVISA: false,
+            params,
+          });
+        });
+      }
+    },
+    [isVisa, config, userIdentity, sendToWebView, formatCards]
+  );
+
+  const checkout = useCallback(
+    async (params: CheckoutParams): Promise<any> => {
+      if (!config) {
+        throw new Error('SDK not initialized');
+      }
+
+      setIsLoading(true);
+
+      let encryptedCardData: string | undefined = params.encryptedCard;
+
+      if (params.cardData) {
+        try {
+          encryptedCardData = await new Promise<string>((resolve, reject) => {
+            pendingPromiseRef.current = { resolve, reject };
+            sendToWebView('ENCRYPT_CARD', { cardData: params.cardData });
+          });
+        } catch (error) {
+          setIsLoading(false);
+          throw new Error(
+            `Card encryption failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+          );
+        }
+      }
+
+      let checkoutParams: any;
+
+      if (isVisa) {
+        checkoutParams = {
+          srcDigitalCardId: params.srcDigitalCardId,
+          encryptedCard: encryptedCardData,
+          amount: params.amount,
+          currency: params.currency,
+          merchantOrderId: params.orderId,
+        };
+
+        if (params.rememberMe) {
+          checkoutParams.complianceSettings = {
+            complianceResources: [
+              {
+                complianceType: 'PRIVACY_POLICY',
+                uri: 'https://www.visa.com/en_us/checkout/legal/global-privacy-notice.html',
+              },
+              {
+                complianceType: 'REMEMBER_ME',
+                uri: 'https://www.visa.com/en_us/checkout/legal/global-privacy-notice/cookie-notice.html',
+              },
+              {
+                complianceType: 'TERMS_AND_CONDITIONS',
+                uri: 'https://www.visa.com/en_us/checkout/legal/terms-of-service.html',
+              },
+            ],
+          };
+        }
+      } else {
+        checkoutParams = {
+          srcDigitalCardId: params.srcDigitalCardId,
+          encryptedCard: encryptedCardData,
+          dpaTransactionOptions: {
+            transactionAmount: {
+              transactionAmount: parseFloat(params.amount),
+              transactionCurrencyCode: params.currency,
+            },
+          },
+          rememberMe:
+            params.rememberMe !== undefined ? params.rememberMe : true,
+        };
+      }
+
+      return new Promise((resolve, reject) => {
+        pendingPromiseRef.current = { resolve, reject };
+        sendToWebView('CHECKOUT', {
+          isVISA: isVisa,
+          params: checkoutParams,
+        });
+      });
+    },
+    [isVisa, config, sendToWebView]
   );
 
   const contextValue: ClickToPayContextValue = {
-    isReady,
     isLoading,
-    error,
     cards,
     config,
-    updateConfig,
-    getCards,
-    idLookup,
-    initiateValidation,
+    initialize,
     validate,
+    authenticate,
     checkout,
-    clearError,
   };
 
   return (
@@ -647,6 +605,8 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
       <ClickToPayComponent
         ref={componentRef}
         onMessage={handleWebViewMessage}
+        onCookiesExtracted={onCookiesExtracted}
+        initialCookies={initialCookies}
       />
       {children}
     </ClickToPayContext.Provider>

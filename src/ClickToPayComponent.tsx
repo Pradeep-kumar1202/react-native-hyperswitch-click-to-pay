@@ -1,10 +1,18 @@
-import { useRef, useImperativeHandle, forwardRef } from 'react';
+import {
+  useRef,
+  useImperativeHandle,
+  forwardRef,
+  useState,
+  useEffect,
+} from 'react';
 import { View, StyleSheet } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import { clickToPayWebViewHTML } from './clickToPayWebView.html';
+import { clickToPayWebViewHTML } from './clickToPayWebView.html.ts';
 
 export type ClickToPayComponentProps = {
   onMessage: (type: string, data: any) => void;
+  onCookiesExtracted?: (cookies: string) => void;
+  initialCookies?: string;
 };
 
 export type ClickToPayComponentRef = {
@@ -14,8 +22,39 @@ export type ClickToPayComponentRef = {
 const ClickToPayComponent = forwardRef<
   ClickToPayComponentRef,
   ClickToPayComponentProps
->(({ onMessage }, ref) => {
+>(({ onMessage, onCookiesExtracted, initialCookies }, ref) => {
   const webViewRef = useRef<WebView>(null);
+  const [isCheckoutActive, setIsCheckoutActive] = useState(false);
+
+  useEffect(() => {
+    if (initialCookies && webViewRef.current) {
+      const setCookiesScript = `
+        (function() {
+          document.cookie = ${JSON.stringify(initialCookies)};
+        })();
+        true;
+      `;
+      webViewRef.current.injectJavaScript(setCookiesScript);
+    }
+  }, [initialCookies]);
+
+  const extractCookies = () => {
+    if (webViewRef.current && onCookiesExtracted) {
+      const extractScript = `
+        (function() {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            clickToPayResponse: {
+              type: 'COOKIES_EXTRACTED',
+              data: document.cookie,
+              timestamp: Date.now()
+            }
+          }));
+        })();
+        true;
+      `;
+      webViewRef.current.injectJavaScript(extractScript);
+    }
+  };
 
   useImperativeHandle(ref, () => ({
     sendMessage: (type: string, data: any) => {
@@ -26,6 +65,8 @@ const ClickToPayComponent = forwardRef<
             message: data,
           },
         };
+
+        console.log(message);
 
         const script = `
             (function() {
@@ -49,6 +90,28 @@ const ClickToPayComponent = forwardRef<
 
       if (message) {
         console.log(JSON.stringify(message));
+
+        if (message.type === 'COOKIES_EXTRACTED') {
+          if (onCookiesExtracted) {
+            onCookiesExtracted(message.data);
+          }
+          return;
+        }
+
+        if (message.type === 'CHECKOUT_INITIATED') {
+          setIsCheckoutActive(true);
+        }
+
+        if (
+          message.type === 'CHECKOUT_SUCCESS' ||
+          message.type === 'CHECKOUT_FAILED'
+        ) {
+          setIsCheckoutActive(false);
+          if (message.type === 'CHECKOUT_SUCCESS') {
+            extractCookies();
+          }
+        }
+
         onMessage(message.type, message.data);
       }
     } catch (error) {
@@ -57,12 +120,17 @@ const ClickToPayComponent = forwardRef<
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        isCheckoutActive ? styles.fullScreen : styles.hidden,
+      ]}
+    >
       <WebView
         ref={webViewRef}
         source={{
           html: clickToPayWebViewHTML,
-          baseUrl: 'https://localhost',
+          baseUrl: 'https://hyperswitch.io',
         }}
         onMessage={handleWebViewMessage}
         javaScriptEnabled={true}
@@ -82,9 +150,20 @@ const ClickToPayComponent = forwardRef<
 
 const styles = StyleSheet.create({
   container: {
-    width: 400,
-    height: 400,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  hidden: {
+    width: 0,
+    height: 0,
+    opacity: 0,
+  },
+  fullScreen: {
+    width: '100%',
+    height: '100%',
     opacity: 1,
+    zIndex: 9999,
   },
 });
 

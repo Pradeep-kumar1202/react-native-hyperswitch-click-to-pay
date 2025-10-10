@@ -9,6 +9,7 @@ export type ClickToPayConfig = {
   transactionCurrency?: string;
   timeout?: number;
   debug?: boolean;
+  recognitionToken?: string;
 };
 
 export type ClickToPayCard = {

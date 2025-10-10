@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -16,29 +16,81 @@ import {
   type ClickToPayCard,
 } from 'react-native-hyperswitch-click-to-pay';
 
-// Configuration state moved to App level
 const App: React.FC = () => {
+  const [cookieInput, setCookieInput] = useState('');
+  const [extractedCookies, setExtractedCookies] = useState('');
+  const [activeCookies, setActiveCookies] = useState('');
+
+  const handleCookiesExtracted = (cookies: string) => {
+    console.log('Cookies extracted:', cookies);
+    setExtractedCookies(cookies);
+    setActiveCookies(cookies);
+    Alert.alert(
+      'Cookies Extracted',
+      'Cookies have been automatically saved from checkout'
+    );
+  };
+
+  const handleSetCookies = () => {
+    if (!cookieInput.trim()) {
+      Alert.alert('Error', 'Please enter cookies first');
+      return;
+    }
+    setActiveCookies(cookieInput);
+    Alert.alert('Success', 'Cookies have been set');
+  };
+
+  const handleClearCookies = () => {
+    setCookieInput('');
+    setExtractedCookies('');
+    setActiveCookies('');
+    Alert.alert('Success', 'All cookies have been cleared');
+  };
+
   return (
     <ClickToPayProvider
-      config={{
-        dpaId: '498WCF39JVQVH1UK4TGG21leLAj_MJQoapP5f12IanfEYaSno',
-        environment: 'sandbox',
-        provider: 'visa',
-        locale: 'en_US',
-        cardBrands: 'visa,mastercard',
-        clientId: 'TestMerchant',
-        transactionAmount: '500.00',
-        transactionCurrency: 'USD',
-        timeout: 30000,
-        debug: true,
-      }}
+      onCookiesExtracted={handleCookiesExtracted}
+      initialCookies={activeCookies}
     >
-      <CheckoutScreen />
+      <CheckoutScreen
+        cookieInput={cookieInput}
+        setCookieInput={setCookieInput}
+        extractedCookies={extractedCookies}
+        activeCookies={activeCookies}
+        onSetCookies={handleSetCookies}
+        onClearCookies={handleClearCookies}
+      />
     </ClickToPayProvider>
   );
 };
 
-const CheckoutScreen: React.FC = () => {
+type CheckoutScreenProps = {
+  cookieInput: string;
+  setCookieInput: (value: string) => void;
+  extractedCookies: string;
+  activeCookies: string;
+  onSetCookies: () => void;
+  onClearCookies: () => void;
+};
+
+const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
+  cookieInput,
+  setCookieInput,
+  extractedCookies,
+  activeCookies,
+  onSetCookies,
+  onClearCookies,
+}) => {
+  // Configuration state
+  const [dpaId, setDpaId] = useState(
+    '498WCF39JVQVH1UK4TGG21leLAj_MJQoapP5f12IanfEYaSno'
+  );
+  const [provider, setProvider] = useState<'visa' | 'mastercard'>('visa');
+  const [environment, setEnvironment] = useState<'sandbox' | 'production'>(
+    'sandbox'
+  );
+  const [idToken, setIdToken] = useState('');
+
   // User identity state
   const [userIdentity, setUserIdentity] = useState('shivam.shashank@juspay.in');
   const [identityType, setIdentityType] = useState<
@@ -47,6 +99,9 @@ const CheckoutScreen: React.FC = () => {
 
   // OTP state
   const [otpCode, setOtpCode] = useState('');
+  const [requiresOTP, setRequiresOTP] = useState(false);
+  const [maskedChannel, setMaskedChannel] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
 
   // Payment state
   const [amount, setAmount] = useState('99.99');
@@ -54,127 +109,223 @@ const CheckoutScreen: React.FC = () => {
   const [orderId, setOrderId] = useState('order-123');
   const [selectedCardId, setSelectedCardId] = useState('');
 
+  // Card data for new card
+  const [cardNumber, setCardNumber] = useState('4111111111111111');
+  const [expiryMonth, setExpiryMonth] = useState('12');
+  const [expiryYear, setExpiryYear] = useState('2025');
+  const [cvv, setCvv] = useState('123');
+  const [cardholderName, setCardholderName] = useState('John Doe');
+  const [useNewCard, setUseNewCard] = useState(false);
+
   const {
-    isReady,
     isLoading,
-    error,
     cards,
     config,
-    updateConfig,
-    getCards,
-    idLookup,
-    initiateValidation,
+    initialize,
     validate,
+    authenticate,
     checkout,
-    clearError,
   } = useClickToPay();
 
-  const { dpaId, environment, provider, locale } = config;
-
-  const handleGetCards = async () => {
+  const handleInitialize = async () => {
     try {
-      const retrievedCards = await getCards({
+      await initialize({
+        dpaId,
+        environment,
+        provider,
+        locale: 'en_US',
+        cardBrands: 'visa,mastercard',
+        clientId: 'TestMerchant',
+        transactionAmount: amount,
+        transactionCurrency: currency,
+        recognitionToken:
+          provider === 'mastercard' && idToken ? idToken : undefined,
+      });
+      Alert.alert(
+        'Success',
+        'SDK initialized successfully' +
+          (idToken ? ' with Recognition Token' : '')
+      );
+    } catch (err) {
+      Alert.alert(
+        'Error',
+        err instanceof Error ? err.message : 'Initialization failed'
+      );
+    }
+  };
+
+  const handleValidate = async () => {
+    try {
+      const result = await validate({
         value: userIdentity,
         type: identityType,
       });
-      Alert.alert('Cards Retrieved', `Found ${retrievedCards.length} cards`, [
-        { text: 'OK' },
-      ]);
 
-      if (retrievedCards.length > 0 && retrievedCards[0]) {
-        setSelectedCardId(retrievedCards[0].digitalCardId);
+      if (result.requiresOTP) {
+        setRequiresOTP(true);
+        setMaskedChannel(result.maskedValidationChannel || '');
+        Alert.alert(
+          'OTP Required',
+          `OTP sent to ${result.maskedValidationChannel}`
+        );
+      } else if (result.requiresNewCard) {
+        setUseNewCard(true);
+        Alert.alert('New Card Required', 'Please provide card details');
+      } else if (result.cards && result.cards.length > 0) {
+        setSelectedCardId(result.cards[0]!.id);
+        Alert.alert('Success', `Found ${result.cards.length} card(s)`);
       }
     } catch (err) {
       Alert.alert(
         'Error',
-        err instanceof Error ? err.message : 'Failed to get cards',
-        [{ text: 'OK' }]
+        err instanceof Error ? err.message : 'Validation failed'
       );
     }
   };
 
-  const handleIdLookup = async () => {
+  const handleAuthenticate = async () => {
     try {
-      await idLookup({ value: userIdentity, type: identityType });
-      Alert.alert('Success', 'ID Lookup completed', [{ text: 'OK' }]);
+      const retrievedCards = await authenticate(otpCode);
+      if (retrievedCards.length > 0) {
+        setSelectedCardId(retrievedCards[0]!.id);
+        setRequiresOTP(false);
+        Alert.alert('Success', `Retrieved ${retrievedCards.length} card(s)`);
+      }
     } catch (err) {
       Alert.alert(
         'Error',
-        err instanceof Error ? err.message : 'ID Lookup failed',
-        [{ text: 'OK' }]
-      );
-    }
-  };
-
-  const handleSendOTP = async () => {
-    try {
-      await initiateValidation();
-      Alert.alert('Success', 'OTP sent successfully', [{ text: 'OK' }]);
-    } catch (err) {
-      Alert.alert(
-        'Error',
-        err instanceof Error ? err.message : 'Failed to send OTP',
-        [{ text: 'OK' }]
-      );
-    }
-  };
-
-  const handleValidateOTP = async () => {
-    try {
-      await validate(otpCode);
-      Alert.alert('Success', 'OTP validated successfully', [{ text: 'OK' }]);
-    } catch (err) {
-      Alert.alert(
-        'Error',
-        err instanceof Error ? err.message : 'OTP validation failed',
-        [{ text: 'OK' }]
+        err instanceof Error ? err.message : 'Authentication failed'
       );
     }
   };
 
   const handleCheckout = async () => {
-    if (!selectedCardId) {
-      Alert.alert('Error', 'Please select a card first', [{ text: 'OK' }]);
-      return;
-    }
-
     try {
-      await checkout(selectedCardId, amount, currency, orderId);
-      Alert.alert('Success', 'Checkout completed successfully', [
-        { text: 'OK' },
-      ]);
+      let result;
+
+      if (useNewCard) {
+        // Checkout with new card (auto-encrypted)
+        result = await checkout({
+          cardData: {
+            cardNumber,
+            expiryMonth,
+            expiryYear,
+            cvv,
+            cardholderName,
+          },
+          amount,
+          currency,
+          orderId,
+          rememberMe,
+        });
+      } else {
+        // Checkout with existing card
+        if (!selectedCardId) {
+          Alert.alert('Error', 'Please select a card first');
+          return;
+        }
+        result = await checkout({
+          srcDigitalCardId: selectedCardId,
+          amount,
+          currency,
+          orderId,
+          rememberMe,
+        });
+      }
+
+      // Extract idToken from Mastercard response
+      if (provider === 'mastercard' && result?.idToken) {
+        setIdToken(result.idToken);
+        Alert.alert(
+          'Success',
+          `Checkout completed! ID Token received and saved.`
+        );
+      } else {
+        Alert.alert('Success', 'Checkout completed successfully');
+      }
+
+      console.log('Checkout result:', result);
     } catch (err) {
       Alert.alert(
         'Error',
-        err instanceof Error ? err.message : 'Checkout failed',
-        [{ text: 'OK' }]
+        err instanceof Error ? err.message : 'Checkout failed'
       );
     }
   };
 
-  useEffect(() => {
-    if (error) {
-      Alert.alert(
-        'Click to Pay Error',
-        `${error.message}\n\nCode: ${error.code}\nCategory: ${error.category}`,
-        [{ text: 'Clear Error', onPress: clearError }, { text: 'OK' }]
-      );
-    }
-  }, [error, clearError]);
-
-  useEffect(() => {
-    if (cards.length > 0 && !selectedCardId && cards[0]) {
-      setSelectedCardId(cards[0].digitalCardId);
-    }
-  }, [cards, selectedCardId]);
+  const isInitialized = config !== null;
 
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      style={styles.scrollView}
-    >
+    <ScrollView style={styles.scrollView}>
+      <View style={[styles.section, styles.cookieSection]}>
+        <Text style={styles.sectionTitle}>🍪 Cookie Management</Text>
+
+        <Text style={styles.label}>Manual Cookie Input</Text>
+        <Text style={styles.helperText}>Format: key=value; key2=value2</Text>
+        <TextInput
+          style={[styles.input, styles.multilineInput]}
+          value={cookieInput}
+          onChangeText={setCookieInput}
+          placeholder="sessionId=abc123; token=xyz789"
+          multiline
+          numberOfLines={3}
+        />
+
+        <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.halfButton,
+              !cookieInput && styles.buttonDisabled,
+            ]}
+            onPress={onSetCookies}
+            disabled={!cookieInput}
+          >
+            <Text style={styles.buttonText}>Set Cookies</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.halfButton, styles.dangerButton]}
+            onPress={onClearCookies}
+          >
+            <Text style={styles.buttonText}>Clear All</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.label}>
+          Extracted Cookies (Auto-populated after checkout)
+        </Text>
+        <TextInput
+          style={[styles.input, styles.multilineInput, styles.readOnlyInput]}
+          value={extractedCookies}
+          placeholder="Cookies will appear here after successful checkout"
+          multiline
+          numberOfLines={3}
+          editable={false}
+        />
+
+        <View style={styles.statusRow}>
+          <Text style={styles.statusLabel}>Active Cookies:</Text>
+          <Text
+            style={[
+              styles.statusBadge,
+              activeCookies
+                ? styles.statusBadgeActive
+                : styles.statusBadgeInactive,
+            ]}
+          >
+            {activeCookies ? '✓ Set' : '✗ None'}
+          </Text>
+        </View>
+        {activeCookies && (
+          <Text style={styles.cookiePreview} numberOfLines={2}>
+            {activeCookies}
+          </Text>
+        )}
+      </View>
+
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Provider Selection</Text>
+        <Text style={styles.sectionTitle}>1. Initialize SDK</Text>
+
         <View style={styles.providerToggle}>
           <TouchableOpacity
             style={[
@@ -182,10 +333,8 @@ const CheckoutScreen: React.FC = () => {
               provider === 'visa' && styles.providerButtonActive,
             ]}
             onPress={() => {
-              updateConfig({
-                provider: 'visa',
-                dpaId: '498WCF39JVQVH1UK4TGG21leLAj_MJQoapP5f12IanfEYaSno',
-              });
+              setProvider('visa');
+              setDpaId('498WCF39JVQVH1UK4TGG21leLAj_MJQoapP5f12IanfEYaSno');
             }}
           >
             <Text
@@ -203,10 +352,8 @@ const CheckoutScreen: React.FC = () => {
               provider === 'mastercard' && styles.providerButtonActive,
             ]}
             onPress={() => {
-              updateConfig({
-                provider: 'mastercard',
-                dpaId: 'b6e06cc6-3018-4c4c-bbf5-9fb232615090',
-              });
+              setProvider('mastercard');
+              setDpaId('b6e06cc6-3018-4c4c-bbf5-9fb232615090');
             }}
           >
             <Text
@@ -219,62 +366,65 @@ const CheckoutScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
         </View>
+
         <View style={styles.switchRow}>
           <Text style={styles.label}>Sandbox Mode</Text>
           <Switch
             value={environment === 'sandbox'}
             onValueChange={(value) =>
-              updateConfig({ environment: value ? 'sandbox' : 'production' })
+              setEnvironment(value ? 'sandbox' : 'production')
             }
           />
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Configuration</Text>
         <Text style={styles.label}>DPA ID</Text>
-        <TextInput
-          style={styles.input}
-          value={dpaId}
-          onChangeText={(value) => updateConfig({ dpaId: value })}
-          placeholder="DPA ID"
-        />
-        <Text style={styles.label}>Locale</Text>
-        <TextInput
-          style={styles.input}
-          value={locale}
-          onChangeText={(value) => updateConfig({ locale: value })}
-          placeholder="en_US"
-        />
-      </View>
+        <TextInput style={styles.input} value={dpaId} onChangeText={setDpaId} />
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>SDK Status</Text>
-        <View style={styles.statusContainer}>
-          <View
-            style={[
-              styles.statusIndicator,
-              isReady ? styles.ready : styles.loading,
-            ]}
-          />
-          <Text style={styles.statusText}>
-            {isLoading ? 'Loading...' : isReady ? 'Ready' : 'Initializing'}
+        {provider === 'mastercard' && (
+          <>
+            <Text style={styles.label}>
+              ID Token (Recognition Token - Mastercard)
+            </Text>
+            <Text style={styles.helperText}>
+              Auto-populated from checkout or enter manually
+            </Text>
+            <TextInput
+              style={[styles.input, styles.multilineInput]}
+              value={idToken}
+              onChangeText={setIdToken}
+              placeholder="ID Token from previous checkout"
+              multiline
+              numberOfLines={2}
+            />
+          </>
+        )}
+
+        <TouchableOpacity
+          style={[styles.button, isInitialized && styles.buttonDisabled]}
+          onPress={handleInitialize}
+          disabled={isLoading || isInitialized}
+        >
+          <Text style={styles.buttonText}>
+            {isInitialized
+              ? '✓ Initialized'
+              : isLoading
+                ? 'Initializing...'
+                : 'Initialize SDK'}
           </Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>User Identity</Text>
+        <Text style={styles.sectionTitle}>2. Validate User</Text>
+
         <Text style={styles.label}>Email/Phone</Text>
         <TextInput
           style={styles.input}
           value={userIdentity}
           onChangeText={setUserIdentity}
           placeholder="user@example.com"
-          keyboardType={
-            identityType === 'EMAIL_ADDRESS' ? 'email-address' : 'phone-pad'
-          }
         />
+
         <View style={styles.switchRow}>
           <Text style={styles.label}>Use Email</Text>
           <Switch
@@ -284,100 +434,157 @@ const CheckoutScreen: React.FC = () => {
             }
           />
         </View>
+
         <TouchableOpacity
-          style={[styles.button, !isReady && styles.buttonDisabled]}
-          onPress={handleIdLookup}
-          disabled={!isReady || isLoading}
-        >
-          <Text style={styles.buttonText}>ID Lookup</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.button, !isReady && styles.buttonDisabled]}
-          onPress={handleGetCards}
-          disabled={!isReady || isLoading}
+          style={[styles.button, !isInitialized && styles.buttonDisabled]}
+          onPress={handleValidate}
+          disabled={!isInitialized || isLoading}
         >
           <Text style={styles.buttonText}>
-            {isLoading ? 'Loading...' : 'Get Cards'}
+            {isLoading ? 'Validating...' : 'Validate User'}
           </Text>
         </TouchableOpacity>
+
+        {maskedChannel && (
+          <Text style={styles.infoText}>OTP sent to: {maskedChannel}</Text>
+        )}
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>OTP Validation</Text>
-        <Text style={styles.label}>OTP Code</Text>
-        <TextInput
-          style={styles.input}
-          value={otpCode}
-          onChangeText={setOtpCode}
-          placeholder="123456"
-          keyboardType="number-pad"
-          maxLength={6}
-        />
-        <TouchableOpacity
-          style={[
-            styles.button,
-            styles.secondaryButton,
-            !isReady && styles.buttonDisabled,
-          ]}
-          onPress={handleSendOTP}
-          disabled={!isReady || isLoading}
-        >
-          <Text style={styles.buttonText}>Send OTP</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.button,
-            styles.secondaryButton,
-            !isReady && styles.buttonDisabled,
-          ]}
-          onPress={handleValidateOTP}
-          disabled={!isReady || isLoading || !otpCode}
-        >
-          <Text style={styles.buttonText}>Validate OTP</Text>
-        </TouchableOpacity>
-      </View>
+      {requiresOTP && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>3. Authenticate with OTP</Text>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>
-          Available Cards ({cards.length})
-        </Text>
-        {cards.length > 0 ? (
-          cards.map((card: ClickToPayCard) => (
+          <Text style={styles.label}>OTP Code</Text>
+          <TextInput
+            style={styles.input}
+            value={otpCode}
+            onChangeText={setOtpCode}
+            placeholder="123456"
+            keyboardType="number-pad"
+            maxLength={6}
+          />
+
+          <View style={styles.switchRow}>
+            <View>
+              <Text style={styles.label}>Remember Me</Text>
+              <Text style={styles.helperText}>
+                Save card for future checkouts
+              </Text>
+            </View>
+            <Switch value={rememberMe} onValueChange={setRememberMe} />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.button, !otpCode && styles.buttonDisabled]}
+            onPress={handleAuthenticate}
+            disabled={!otpCode || isLoading}
+          >
+            <Text style={styles.buttonText}>
+              {isLoading ? 'Authenticating...' : 'Submit OTP'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {cards.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Available Cards ({cards.length})
+          </Text>
+          {cards.map((card: ClickToPayCard) => (
             <TouchableOpacity
               key={card.id}
               style={[
                 styles.cardItem,
-                selectedCardId === card.digitalCardId &&
-                  styles.cardItemSelected,
+                selectedCardId === card.id && styles.cardItemSelected,
               ]}
-              onPress={() => setSelectedCardId(card.digitalCardId)}
+              onPress={() => {
+                setSelectedCardId(card.id);
+                setUseNewCard(false);
+              }}
             >
               <View style={styles.cardHeader}>
                 <Text style={styles.cardBrand}>{card.brand.toUpperCase()}</Text>
-                {selectedCardId === card.digitalCardId && (
+                {selectedCardId === card.id && (
                   <Text style={styles.selectedBadge}>✓ Selected</Text>
                 )}
               </View>
-              <Text style={styles.cardNumber}>{card.maskedPan}</Text>
+              <Text style={styles.cardNumber}>•••• {card.maskedPan}</Text>
               <Text style={styles.cardExpiry}>
                 Expires: {card.expiryMonth}/{card.expiryYear}
               </Text>
-              <Text style={styles.cardId}>
-                ID: {card.digitalCardId.substring(0, 20)}...
-              </Text>
             </TouchableOpacity>
-          ))
-        ) : (
-          <Text style={styles.noCardsText}>
-            {isReady
-              ? 'No cards available. Click "Get Cards" to retrieve.'
-              : 'Waiting for SDK to initialize...'}
-          </Text>
-        )}
-      </View>
+          ))}
+        </View>
+      )}
+
+      {useNewCard && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>New Card Details</Text>
+
+          <Text style={styles.label}>Card Number</Text>
+          <TextInput
+            style={styles.input}
+            value={cardNumber}
+            onChangeText={setCardNumber}
+            placeholder="4111111111111111"
+            keyboardType="number-pad"
+          />
+
+          <View style={styles.row}>
+            <View style={styles.halfWidth}>
+              <Text style={styles.label}>Expiry Month</Text>
+              <TextInput
+                style={styles.input}
+                value={expiryMonth}
+                onChangeText={setExpiryMonth}
+                placeholder="12"
+                keyboardType="number-pad"
+                maxLength={2}
+              />
+            </View>
+            <View style={styles.halfWidth}>
+              <Text style={styles.label}>Expiry Year</Text>
+              <TextInput
+                style={styles.input}
+                value={expiryYear}
+                onChangeText={setExpiryYear}
+                placeholder="2025"
+                keyboardType="number-pad"
+                maxLength={4}
+              />
+            </View>
+          </View>
+
+          <View style={styles.row}>
+            <View style={styles.halfWidth}>
+              <Text style={styles.label}>CVV</Text>
+              <TextInput
+                style={styles.input}
+                value={cvv}
+                onChangeText={setCvv}
+                placeholder="123"
+                keyboardType="number-pad"
+                maxLength={4}
+                secureTextEntry
+              />
+            </View>
+            <View style={styles.halfWidth}>
+              <Text style={styles.label}>Cardholder Name</Text>
+              <TextInput
+                style={styles.input}
+                value={cardholderName}
+                onChangeText={setCardholderName}
+                placeholder="John Doe"
+              />
+            </View>
+          </View>
+        </View>
+      )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Payment</Text>
+        <Text style={styles.sectionTitle}>4. Checkout</Text>
+
         <Text style={styles.label}>Amount</Text>
         <TextInput
           style={styles.input}
@@ -386,6 +593,7 @@ const CheckoutScreen: React.FC = () => {
           placeholder="99.99"
           keyboardType="decimal-pad"
         />
+
         <Text style={styles.label}>Currency</Text>
         <TextInput
           style={styles.input}
@@ -393,6 +601,7 @@ const CheckoutScreen: React.FC = () => {
           onChangeText={setCurrency}
           placeholder="USD"
         />
+
         <Text style={styles.label}>Order ID</Text>
         <TextInput
           style={styles.input}
@@ -400,46 +609,45 @@ const CheckoutScreen: React.FC = () => {
           onChangeText={setOrderId}
           placeholder="order-123"
         />
+
+        {!useNewCard && cards.length > 0 && (
+          <TouchableOpacity
+            style={[styles.button, styles.secondaryButton]}
+            onPress={() => setUseNewCard(true)}
+          >
+            <Text style={styles.buttonText}>Use New Card Instead</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={[
             styles.button,
             styles.checkoutButton,
-            (!isReady || !selectedCardId) && styles.buttonDisabled,
+            (!isInitialized || (!selectedCardId && !useNewCard)) &&
+              styles.buttonDisabled,
           ]}
           onPress={handleCheckout}
-          disabled={!isReady || isLoading || !selectedCardId}
+          disabled={
+            !isInitialized || isLoading || (!selectedCardId && !useNewCard)
+          }
         >
           <Text style={styles.buttonText}>
-            Checkout {currency} {amount}
+            {isLoading ? 'Processing...' : `Checkout ${currency} ${amount}`}
           </Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Actions</Text>
-        {error && (
-          <TouchableOpacity
-            style={[styles.button, styles.clearButton]}
-            onPress={clearError}
-          >
-            <Text style={styles.buttonText}>Clear Error</Text>
-          </TouchableOpacity>
-        )}
+        <Text style={styles.sectionTitle}>Status</Text>
+        <Text style={styles.statusText}>
+          SDK: {isInitialized ? '✓ Initialized' : '✗ Not Initialized'}
+        </Text>
+        <Text style={styles.statusText}>
+          Loading: {isLoading ? 'Yes' : 'No'}
+        </Text>
+        <Text style={styles.statusText}>Cards: {cards.length}</Text>
+        <Text style={styles.statusText}>Provider: {provider}</Text>
       </View>
-
-      {error && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Error Details</Text>
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>Message: {error.message}</Text>
-            <Text style={styles.errorText}>Code: {error.code}</Text>
-            <Text style={styles.errorText}>Category: {error.category}</Text>
-            <Text style={styles.errorText}>
-              Recoverable: {error.recoverable ? 'Yes' : 'No'}
-            </Text>
-          </View>
-        </View>
-      )}
     </ScrollView>
   );
 };
@@ -449,32 +657,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  header: {
-    padding: 20,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    marginBottom: 10,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-  },
   section: {
     backgroundColor: '#fff',
     margin: 10,
     padding: 15,
     borderRadius: 8,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.22,
     shadowRadius: 2.22,
     elevation: 3,
@@ -533,26 +722,6 @@ const styles = StyleSheet.create({
   providerButtonTextActive: {
     color: '#fff',
   },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusIndicator: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 10,
-  },
-  loading: {
-    backgroundColor: '#ffa726',
-  },
-  ready: {
-    backgroundColor: '#66bb6a',
-  },
-  statusText: {
-    fontSize: 16,
-    color: '#333',
-  },
   cardItem: {
     backgroundColor: '#f8f9fa',
     padding: 12,
@@ -590,19 +759,6 @@ const styles = StyleSheet.create({
   cardExpiry: {
     fontSize: 12,
     color: '#666',
-    marginBottom: 2,
-  },
-  cardId: {
-    fontSize: 10,
-    color: '#999',
-    fontFamily: 'monospace',
-  },
-  noCardsText: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    padding: 20,
   },
   button: {
     backgroundColor: '#007bff',
@@ -620,25 +776,94 @@ const styles = StyleSheet.create({
   checkoutButton: {
     backgroundColor: '#28a745',
   },
-  clearButton: {
-    backgroundColor: '#dc3545',
-  },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  errorContainer: {
-    backgroundColor: '#ffebee',
-    padding: 12,
-    borderRadius: 6,
-    borderLeftWidth: 4,
-    borderLeftColor: '#f44336',
+  infoText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 10,
+    fontStyle: 'italic',
   },
-  errorText: {
+  statusText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 5,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  halfWidth: {
+    flex: 1,
+  },
+  cookieSection: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#ff9800',
+  },
+  helperText: {
     fontSize: 12,
-    color: '#d32f2f',
-    marginBottom: 2,
+    color: '#999',
+    marginBottom: 5,
+    fontStyle: 'italic',
+  },
+  multilineInput: {
+    minHeight: 70,
+    textAlignVertical: 'top',
+  },
+  readOnlyInput: {
+    backgroundColor: '#f0f0f0',
+    color: '#666',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  halfButton: {
+    flex: 1,
+    marginTop: 0,
+  },
+  dangerButton: {
+    backgroundColor: '#dc3545',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 15,
+    marginBottom: 5,
+  },
+  statusLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#555',
+    marginRight: 10,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  statusBadgeActive: {
+    backgroundColor: '#d4edda',
+    color: '#155724',
+  },
+  statusBadgeInactive: {
+    backgroundColor: '#f8d7da',
+    color: '#721c24',
+  },
+  cookiePreview: {
+    fontSize: 12,
+    color: '#666',
+    backgroundColor: '#f8f9fa',
+    padding: 8,
+    borderRadius: 4,
+    marginTop: 5,
+    fontFamily: 'monospace',
   },
 });
 
