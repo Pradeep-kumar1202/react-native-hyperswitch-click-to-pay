@@ -100,21 +100,21 @@ export const clickToPayWebViewHTML = `
           sendMessage('CHECKOUT_INITIATED', { isVISA: data.isVISA });
           
           let result;
+          const checkoutParams = {
+            ...data.params,
+            windowRef: document.getElementById('dcfLaunch').contentWindow
+          };
           if (data.isVISA) {
             if (!clickToPayServices.visa) {
               sendMessage('CHECKOUT_FAILED', 'Visa service not initialized');
               return;
             }
-            result = await clickToPayServices.visa.checkout(data.params);
+            result = await clickToPayServices.visa.checkout(checkoutParams);
           } else {
             if (!clickToPayServices.mastercard) {
               sendMessage('CHECKOUT_FAILED', 'Mastercard service not initialized');
               return;
             }
-            const checkoutParams = {
-              ...data.params,
-              windowRef: document.getElementById('dcfLaunch').contentWindow
-            };
             result = await clickToPayServices.mastercard.checkoutWithCard(checkoutParams);
           }
           sendMessage('CHECKOUT_SUCCESS', result);

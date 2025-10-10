@@ -130,12 +130,13 @@ const ClickToPayComponent = forwardRef<
         ref={webViewRef}
         source={{
           html: clickToPayWebViewHTML,
-          baseUrl: 'https://hyperswitch.io',
+          baseUrl: 'https://sandbox.secure.checkout.visa.com',
         }}
         onMessage={handleWebViewMessage}
         javaScriptEnabled={true}
         domStorageEnabled={true}
         thirdPartyCookiesEnabled={true}
+        setSupportMultipleWindows={true}
         mixedContentMode="compatibility"
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
