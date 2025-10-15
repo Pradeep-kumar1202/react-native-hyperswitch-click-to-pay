@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,36 +12,36 @@
             padding: 20px;
             background-color: #f5f5f5;
         }
-        
+
         .container {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 20px;
             height: 100vh;
         }
-        
+
         .control-panel {
             background: white;
             padding: 20px;
             border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
             overflow-y: auto;
         }
-        
+
         .iframe-container {
             background: white;
             padding: 20px;
             border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
-        
+
         iframe {
             width: 100%;
             height: 400px;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
-        
+
         .section {
             margin-bottom: 20px;
             padding: 15px;
@@ -48,33 +49,35 @@
             border-radius: 6px;
             background-color: #fafafa;
         }
-        
+
         .section h3 {
             margin-top: 0;
             color: #333;
             border-bottom: 2px solid #007bff;
             padding-bottom: 5px;
         }
-        
+
         .form-group {
             margin-bottom: 15px;
         }
-        
+
         label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
             color: #555;
         }
-        
-        input, select, textarea {
+
+        input,
+        select,
+        textarea {
             width: 100%;
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 14px;
         }
-        
+
         button {
             background-color: #007bff;
             color: white;
@@ -85,16 +88,16 @@
             margin: 5px 5px 5px 0;
             font-size: 14px;
         }
-        
+
         button:hover {
             background-color: #0056b3;
         }
-        
+
         button:disabled {
             background-color: #ccc;
             cursor: not-allowed;
         }
-        
+
         .log {
             background-color: #f8f9fa;
             border: 1px solid #dee2e6;
@@ -107,21 +110,21 @@
             white-space: pre-wrap;
             max-width: 500px;
         }
-        
+
         .provider-toggle {
             display: flex;
             gap: 10px;
             margin-bottom: 15px;
         }
-        
+
         .provider-toggle button {
             flex: 1;
         }
-        
+
         .provider-toggle button.active {
             background-color: #28a745;
         }
-        
+
         .status {
             padding: 10px;
             border-radius: 4px;
@@ -129,26 +132,27 @@
             text-align: center;
             font-weight: bold;
         }
-        
+
         .status.loading {
             background-color: #fff3cd;
             color: #856404;
         }
-        
+
         .status.success {
             background-color: #d4edda;
             color: #155724;
         }
-        
+
         .status.error {
             background-color: #f8d7da;
             color: #721c24;
         }
     </style>
 </head>
+
 <body>
     <h1>Click to Pay Flow Test</h1>
-    
+
     <div class="container">
         <!-- Control Panel -->
         <div class="control-panel">
@@ -266,7 +270,7 @@
         <div class="iframe-container">
             <h3>Click to Pay WebView</h3>
             <iframe id="clickToPayFrame" src="sdk.html"></iframe>
-            
+
             <h3>Message Log</h3>
             <div id="messageLog" class="log">Waiting for messages...</div>
         </div>
@@ -366,10 +370,10 @@
         let validationId = null;
 
         // Initialize
-        window.onload = function() {
+        window.onload = function () {
             iframe = document.getElementById('clickToPayFrame');
             updateStatus('Ready to test', 'success');
-            
+
             // Listen for messages from iframe
             window.addEventListener('message', handleIframeMessage);
         };
@@ -394,7 +398,7 @@
 
         function handleIframeMessage(event) {
             try {
-                let messageData;                
+                let messageData;
                 // Handle both string and object messages
                 if (typeof event.data === 'string') {
                     messageData = JSON.parse(event.data);
@@ -404,17 +408,17 @@
                     log('Unknown message format:', typeof event.data);
                     return;
                 }
-                
+
                 // Extract the clickToPayResponse
                 const message = messageData.clickToPayResponse;
                 if (!message) {
                     return;
                 }
-                
+
                 log(`Received from iframe: ${message.type}`, JSON.stringify(message.data, null, 2));
-                
+
                 // Handle specific responses
-                switch(message.type) {
+                switch (message.type) {
                     case 'LOAD_SUCCESS':
                         updateStatus('SDK Loaded Successfully', 'success');
                         break;
@@ -479,7 +483,7 @@
                 } else if (currentProvider === 'mastercard' && cardsData.cards && cardsData.cards[0]) {
                     cardId = cardsData.cards[0].srcDigitalCardId;
                 }
-                
+
                 if (cardId) {
                     document.getElementById('cardId').value = cardId;
                     log('Auto-populated card ID:', cardId);
@@ -491,14 +495,14 @@
 
         function loadSDK() {
             updateStatus('Loading SDK...', 'loading');
-            
+
             const isVisa = currentProvider === 'visa';
             const testMode = document.getElementById('environment').value === 'true';
             const dpaId = document.getElementById('dpaId').value;
             const cardBrands = document.getElementById('cardBrands').value;
             const clientId = document.getElementById('clientId').value;
             const locale = document.getElementById('locale').value;
-            
+
             let sdkUrl;
             if (isVisa) {
                 const baseUrl = testMode
@@ -511,7 +515,7 @@
                     : 'https://src.mastercard.com/srci/integration/2/lib.js';
                 sdkUrl = `${baseUrl}?srcDpaId=${dpaId}&locale=${locale}`;
             }
-            
+
             const message = {
                 sdkUrl: sdkUrl
             };
@@ -520,8 +524,8 @@
 
         function initializeSDK() {
             updateStatus('Initializing SDK...', 'loading');
-            const provider = currentProvider === 'mastercard';
-            
+            const provider = true; //currentProvider === 'mastercard';
+
             // Use unified configuration with current form values
             const initializeOptions = {
                 srcDpaId: provider ? "b6e06cc6-3018-4c4c-bbf5-9fb232615090" : undefined,
@@ -551,7 +555,7 @@
                         },
                     ],
                     transactionAmount: {
-                        transactionAmount: provider ? 
+                        transactionAmount: provider ?
                             parseFloat(document.getElementById('amount').value) :
                             document.getElementById('amount').value,
                         transactionCurrencyCode: document.getElementById('currency').value,
@@ -568,7 +572,7 @@
                 checkoutExperience: provider ? "WITHIN_CHECKOUT" : undefined,
                 cardBrands: provider ? ["mastercard", "visa"] : undefined,
             };
-            
+
             const message = {
                 isVISA: currentProvider === 'visa',
                 initializeOptions: initializeOptions
@@ -578,15 +582,16 @@
 
         function idLookup() {
             updateStatus('Looking up user...', 'loading');
+            const params = currentProvider === 'visa' ? {
+                consumerIdentity: {
+                    identityProvider: "SRC",
+                    identityValue: document.getElementById('userIdentity').value,
+                    identityType: document.getElementById('identityType').value
+                }
+            } : { email: document.getElementById('userIdentity').value };
             const message = {
                 isVISA: currentProvider === 'visa',
-                params: {
-                    consumerIdentity: {
-                        identityProvider: "SRC",
-                        identityValue: document.getElementById('userIdentity').value,
-                        identityType: document.getElementById('identityType').value
-                    }
-                }
+                params: params
             };
             sendToIframe('ID_LOOKUP', message);
         }
@@ -604,11 +609,11 @@
                     }
                 }
             };
-            
+
             if (otpCode) {
                 message.params.validationData = otpCode;
             }
-            
+
             sendToIframe('GET_CARDS', message);
         }
 
@@ -647,7 +652,7 @@
         }
 
         function checkout() {
-            updateStatus('Processing checkout...', 'loading');
+            updateStatus('Processing checkout...', 'loading');            
             const message = {
                 isVISA: currentProvider === 'visa',
                 params: {
@@ -714,31 +719,31 @@
         function loadStaticConfig() {
             updateStatus('Loading static configuration...', 'loading');
             const config = staticConfig[currentProvider];
-            
+
             // Update DPA ID
             document.getElementById('dpaId').value = config.dpaId;
-            
+
             // Update user identity
             document.getElementById('userIdentity').value = config.authenticateOptions.consumerIdentity.identityValue;
             document.getElementById('identityType').value = config.authenticateOptions.consumerIdentity.identityType;
-            
+
             // Update transaction details
             document.getElementById('amount').value = config.initializeOptions.dpaTransactionOptions.transactionAmount.transactionAmount;
             document.getElementById('currency').value = config.initializeOptions.dpaTransactionOptions.transactionAmount.transactionCurrencyCode;
             document.getElementById('locale').value = config.initializeOptions.dpaTransactionOptions.dpaLocale;
-            
+
             // Update order ID (only for Visa)
             if (currentProvider === 'visa' && config.initializeOptions.dpaTransactionOptions.merchantOrderId) {
                 document.getElementById('orderId').value = config.initializeOptions.dpaTransactionOptions.merchantOrderId;
             } else if (currentProvider === 'mastercard') {
                 document.getElementById('orderId').value = 'order-mc-' + Date.now();
             }
-            
+
             // Update card brands
             if (config.initializeOptions.cardBrands) {
                 document.getElementById('cardBrands').value = config.initializeOptions.cardBrands.join(',');
             }
-            
+
             log('Static configuration loaded for:', currentProvider.toUpperCase());
             log('Configuration data:', JSON.stringify(config, null, 2));
             updateStatus('Static configuration loaded', 'success');
@@ -747,11 +752,11 @@
         function useStaticAuth() {
             updateStatus('Using static authentication...', 'loading');
             const config = staticConfig[currentProvider];
-            
+
             // Update form fields with static auth data
             document.getElementById('userIdentity').value = config.authenticateOptions.consumerIdentity.identityValue;
             document.getElementById('identityType').value = config.authenticateOptions.consumerIdentity.identityType;
-            
+
             log('Static authentication data loaded');
             log('Auth options:', JSON.stringify(config.authenticateOptions, null, 2));
             updateStatus('Static authentication loaded', 'success');
@@ -786,12 +791,12 @@
         function initializeWithStaticData() {
             updateStatus('Initializing with static data...', 'loading');
             const config = staticConfig[currentProvider];
-            
+
             const message = {
                 isVISA: currentProvider === 'visa',
                 initializeOptions: config.initializeOptions
             };
-            
+
             // Add recognition token for Mastercard if available
             if (currentProvider === 'mastercard') {
                 const recognitionToken = getCookie(RECOGNITION_TOKEN_COOKIE_NAME);
@@ -800,7 +805,7 @@
                     log('Added recognition token to initialization');
                 }
             }
-            
+
             sendToIframe('INIT', message);
             log('Initialized with static configuration');
         }
@@ -809,12 +814,12 @@
         function authenticateWithStaticData() {
             updateStatus('Authenticating with static data...', 'loading');
             const config = staticConfig[currentProvider];
-            
+
             const message = {
                 isVISA: currentProvider === 'visa',
                 params: config.authenticateOptions
             };
-            
+
             sendToIframe('GET_CARDS', message);
             log('Authentication started with static data');
         }
@@ -824,13 +829,13 @@
             updateStatus('Checkout with static data...', 'loading');
             const config = staticConfig[currentProvider];
             const cardId = document.getElementById('cardId').value;
-            
+
             if (!cardId) {
                 updateStatus('No card ID available', 'error');
                 log('Error: Card ID is required for checkout');
                 return;
             }
-            
+
             const message = {
                 isVISA: currentProvider === 'visa',
                 params: {
@@ -840,11 +845,12 @@
                     dpaTransactionOptions: config.initializeOptions.dpaTransactionOptions
                 }
             };
-            
+
             sendToIframe('CHECKOUT', message);
             log('Checkout initiated with static configuration');
         }
 
     </script>
 </body>
+
 </html>

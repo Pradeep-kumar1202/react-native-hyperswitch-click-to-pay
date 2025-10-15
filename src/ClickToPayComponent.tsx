@@ -131,6 +131,7 @@ const ClickToPayComponent = forwardRef<
         source={{
           html: clickToPayWebViewHTML,
           baseUrl: 'https://sandbox.secure.checkout.visa.com',
+          // baseUrl: 'https://sandbox.src.mastercard.com',
         }}
         onMessage={handleWebViewMessage}
         javaScriptEnabled={true}
@@ -140,6 +141,8 @@ const ClickToPayComponent = forwardRef<
         mixedContentMode="compatibility"
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
+        incognito={false}
+        cacheEnabled={true}
         onError={(syntheticEvent) => {
           const { nativeEvent } = syntheticEvent;
           console.log('WebView error:', nativeEvent.description);

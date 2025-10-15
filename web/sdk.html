@@ -82,6 +82,7 @@
       const clickToPayServices = {
         visa: null,
         mastercard: null,
+        temp: null
       };
 
       async function initializeSDK(data) {
@@ -90,7 +91,10 @@
 
           if (data.isVISA) {
             clickToPayServices.visa = window.VSDK;
-            const result = await clickToPayServices.visa.initialize(initializeOptions);
+            const result = await clickToPayServices.visa.initialize({dpaTransactionOptions: initializeOptions.dpaTransactionOptions});
+            // let vSrcAdapter = window.vAdapters.VisaSRCI;
+            // clickToPayServices.temp = new vSrcAdapter();
+            // const result2 = await clickToPayServices.temp.init(initializeOptions)
             sendMessage('INIT_SUCCESS', result);
           } else {
             clickToPayServices.mastercard = new window.MastercardCheckoutServices();
@@ -110,6 +114,7 @@
               sendMessage('GET_CARDS_FAILED', 'Visa service not initialized');
               return;
             }
+            // result = await clickToPayServices.temp.identityLookup(data.params);
             result = await clickToPayServices.visa.getCards(data.params);
           } else {
             if (!clickToPayServices.mastercard) {

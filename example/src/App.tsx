@@ -207,11 +207,11 @@ const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
         // Checkout with new card (auto-encrypted)
         result = await checkout({
           cardData: {
-            cardNumber,
-            expiryMonth,
-            expiryYear,
-            cvv,
-            cardholderName,
+            primaryAccountNumber: cardNumber,
+            panExpirationMonth: expiryMonth,
+            panExpirationYear: expiryYear,
+            cardSecurityCode: cvv,
+            cardHolderName: cardholderName,
           },
           amount,
           currency,

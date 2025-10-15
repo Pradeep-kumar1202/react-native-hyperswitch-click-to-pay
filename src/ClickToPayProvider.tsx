@@ -18,11 +18,11 @@ type ValidateResult = {
 };
 
 type CardData = {
-  cardNumber: string;
-  expiryMonth: string;
-  expiryYear: string;
-  cvv: string;
-  cardholderName?: string;
+  primaryAccountNumber: string;
+  panExpirationMonth: string;
+  panExpirationYear: string;
+  cardSecurityCode: string;
+  cardHolderName?: string;
 };
 
 type CheckoutParams = {
@@ -539,44 +539,96 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
 
       if (isVisa) {
         checkoutParams = {
-          srcDigitalCardId: params.srcDigitalCardId,
+          // ...buildInitializeOptions(config),
           encryptedCard: encryptedCardData,
-          amount: params.amount,
-          currency: params.currency,
-          merchantOrderId: params.orderId,
-        };
-
-        if (params.rememberMe) {
-          checkoutParams.complianceSettings = {
-            complianceResources: [
-              {
-                complianceType: 'PRIVACY_POLICY',
-                uri: 'https://www.visa.com/en_us/checkout/legal/global-privacy-notice.html',
-              },
-              {
-                complianceType: 'REMEMBER_ME',
-                uri: 'https://www.visa.com/en_us/checkout/legal/global-privacy-notice/cookie-notice.html',
-              },
-              {
-                complianceType: 'TERMS_AND_CONDITIONS',
-                uri: 'https://www.visa.com/en_us/checkout/legal/terms-of-service.html',
-              },
-            ],
-          };
-        }
-      } else {
-        checkoutParams = {
-          srcDigitalCardId: params.srcDigitalCardId,
-          encryptedCard: encryptedCardData,
-          dpaTransactionOptions: {
-            transactionAmount: {
-              transactionAmount: parseFloat(params.amount),
-              transactionCurrencyCode: params.currency,
+          // amount: params.amount,
+          // currency: params.currency,
+          // merchantOrderId: params.orderId,
+          consumer: {
+            consumerIdentity: {
+              identityProvider: 'SRC',
+              identityValue: userIdentity?.value,
+              identityType: userIdentity?.type,
+            },
+            countryCode: 'IN',
+            emailAddress: userIdentity?.value,
+            fullName: 'test test',
+            locale: 'en',
+            mobileNumber: {
+              phoneNumber: '8003132369',
+              countryCode: '91',
             },
           },
+          payloadTypeIndicatorCheckout: 'FULL',
+        };
+      } else {
+        checkoutParams = {
+          // ...buildInitializeOptions(config),
+          encryptedCard: encryptedCardData,
+          // consumer: {
+          //   emailAddress: userIdentity?.value,
+          //   firstName: 'test',
+          //   lastName: 'test',
+          //   mobileNumber: {
+          //     phoneNumber: '8003132369',
+          //     countryCode: '91'
+          //   }
+          // },
           rememberMe:
             params.rememberMe !== undefined ? params.rememberMe : true,
+          recognitionTokenRequested:
+            params.rememberMe !== undefined ? params.rememberMe : true,
         };
+      }
+
+      console.log(checkoutParams);
+
+      if (params.srcDigitalCardId) {
+        checkoutParams.srcDigitalCardId = params.srcDigitalCardId;
+      }
+
+      const complianceSettingsVisa = {
+        complianceResources: [
+          {
+            complianceType: 'PRIVACY_POLICY',
+            uri: 'https://www.visa.com/en_us/checkout/legal/global-privacy-notice.html',
+          },
+          {
+            complianceType: 'REMEMBER_ME',
+            uri: 'https://www.visa.com/en_us/checkout/legal/global-privacy-notice/cookie-notice.html',
+          },
+          {
+            complianceType: 'TERMS_AND_CONDITIONS',
+            uri: 'https://www.visa.com/en_us/checkout/legal/terms-of-service.html',
+          },
+        ],
+      };
+
+      const complianceSettingsMC = {
+        privacy: {
+          acceptedVersion: 'LATEST',
+          latestVersion: 'LATEST',
+          latestVersionUri:
+            'https://www.mastercard.com/global/click-to-pay/country-listing/privacy.html',
+        },
+        tnc: {
+          acceptedVersion: 'LATEST',
+          latestVersion: 'LATEST',
+          latestVersionUri:
+            'https://www.mastercard.com/global/click-to-pay/country-listing/terms.html',
+        },
+        cookie: {
+          acceptedVersion: 'LATEST',
+          latestVersion: 'LATEST',
+          latestVersionUri:
+            'https://www.mastercard.com/global/click-to-pay/en-sg/privacy-notice.html',
+        },
+      };
+
+      if (params.rememberMe) {
+        checkoutParams.complianceSettings = isVisa
+          ? complianceSettingsVisa
+          : complianceSettingsMC;
       }
 
       return new Promise((resolve, reject) => {
@@ -587,7 +639,7 @@ export const ClickToPayProvider: React.FC<ClickToPayProviderProps> = ({
         });
       });
     },
-    [isVisa, config, sendToWebView]
+    [isVisa, config, userIdentity, sendToWebView]
   );
 
   const contextValue: ClickToPayContextValue = {
